@@ -2248,6 +2248,20 @@ class GraphicalFunctions {
 	 * @todo Define visibility
 	 */
 	public function imageMagickConvert($imagefile, $newExt = '', $w = '', $h = '', $params = '', $frame = '', $options = array(), $mustCreate = FALSE) {
+
+		/*
+		 * Sets cropping configuration
+		 */
+		if (is_array($options) && ($options['cropValues'] || $options['aspectRatio']) ) {
+			$cropImage = array(
+				'aspectRatio' => isset($options['aspectRatio']) ? $options['aspectRatio'] : '',
+				'cropValues' => isset($options['cropValues']) ? $options['cropValues'] : ''
+			);
+			$options = array_merge($options, $cropImage);
+		} else {
+			$cropImage = NULL;
+		}
+
 		if ($this->NO_IMAGE_MAGICK) {
 			// Returning file info right away
 			return $this->getImageDimensions($imagefile);
@@ -2274,6 +2288,44 @@ class GraphicalFunctions {
 				} else {
 					$max = 0;
 				}
+
+				// SIEMS: cropThumbs
+				if (strlen($cropImage['cropValues']) > 1) {
+					$cropXml = simplexml_load_string(html_entity_decode($cropImage['cropValues']), 'SimpleXMLElement', LIBXML_NOCDATA);
+
+					if ($cropXml) {
+						$cropValues = $cropXml->attributes();
+
+						if($cropValues){
+							$cWidth = intval($cropValues['x2'] - $cropValues['x1']);
+							$cHeight = intval($cropValues['y2'] - $cropValues['y1']);
+							$ratio = ($cropValues["x2"] - $cropValues["x1"]) / ($cropValues["y2"] - $cropValues["y1"]);
+						}
+
+						if ($cropImage['aspectRatio'] == 0) {
+							$cropImage['aspectRatio'] = ($cropValues["x2"] - $cropValues["x1"]).':'.($cropValues["y2"] - $cropValues["y1"]);
+						}
+					}
+				}
+
+				// SIEMS: cropThumbs
+				if ($cropImage['aspectRatio'] > 0) {
+					$aspect = preg_split('/:/', $cropImage['aspectRatio'], 2);
+					if ($options['maxW'] && !$w) {
+						$w = $options['maxW'] . 'c';
+						$h = intval($options['maxW'] * ($aspect[1] / $aspect[0])) . 'c';
+					}
+					if ($options['maxW'] && $w) {
+						$w = $w . (substr($w, -1) == 'c' ? '' : 'c');
+						$options['maxW'] = $w;
+						$h = intval($options['maxW'] * ($aspect[1] / $aspect[0])) . 'c';
+					} elseif ($h && $w) {
+						$w = intval($h * ($aspect[0] / $aspect[1])) . 'c';
+						$h = $h . 'c';
+					}
+				}
+				//end DP: cropThumbs
+
 				$data = $this->getImageScale($info, $w, $h, $options);
 				$w = $data['origW'];
 				$h = $data['origH'];
@@ -2293,13 +2345,19 @@ class GraphicalFunctions {
 					$info[3] = $imagefile;
 					return $info;
 				}
+
+				$file['w'] = $info[0];
+				$file['h'] = $info[1];
+
 				$info[0] = $data[0];
 				$info[1] = $data[1];
 				$frame = $this->noFramePrepended ? '' : intval($frame);
 				if (!$params) {
 					$params = $this->cmds[$newExt];
 				}
+
 				// Cropscaling:
+				$paramsOrg = $params;
 				if ($data['crs']) {
 					if (!$data['origW']) {
 						$data['origW'] = $data[0];
@@ -2311,8 +2369,32 @@ class GraphicalFunctions {
 					$offsetY = intval(($data[1] - $data['origH']) * ($data['cropV'] + 100) / 200);
 					$params .= ' -crop ' . $data['origW'] . 'x' . $data['origH'] . '+' . $offsetX . '+' . $offsetY . ' ';
 				}
+
+				// DP: cropThumbs
+				if ($cropValues) {
+					if (!$data['origW']) {
+						$data['origW'] = $file['w'];
+					}
+					if (!$data['origH']) {
+						$data['origH'] = $file['h'];
+					}
+
+
+					$xRatio = $data['origW'] / $cWidth;
+					$offsetX1 = intval($cropValues['x1'] * $xRatio);
+					$yRatio = $data['origH'] / $cHeight;
+					$offsetY1 = intval($cropValues['y1'] * $yRatio);
+
+
+					$cropParams .= ' -crop ' . $data['origW'] . 'x' . $data['origH'] . '+' . $offsetX1 . '+' . $offsetY1 . ' ';
+					$info[0] = intval($data['origW'] + ($file['w'] - $cWidth) * $xRatio);
+					$info[1] = intval($data['origH'] + ($file['h'] - $cHeight) * $yRatio);
+					$params = $paramsOrg . $cropParams;
+				}
+
 				$command = $this->scalecmd . ' ' . $info[0] . 'x' . $info[1] . '! ' . $params . ' ';
 				$cropscale = $data['crs'] ? 'crs-V' . $data['cropV'] . 'H' . $data['cropH'] : '';
+
 				if ($this->alternativeOutputKey) {
 					$theOutputName = \TYPO3\CMS\Core\Utility\GeneralUtility::shortMD5($command . $cropscale . basename($imagefile) . $this->alternativeOutputKey . '[' . $frame . ']');
 				} else {

@@ -199,6 +199,8 @@ class FileRepository extends AbstractRepository {
 	 */
 	public function findByRelation($tableName, $fieldName, $uid) {
 		$itemList = array();
+		$considerWorkspaces = !empty($GLOBALS['BE_USER']->workspace) && \TYPO3\CMS\Backend\Utility\BackendUtility::isTableWorkspaceEnabled($tableName) ? 1 : 0;
+
 		if (!\TYPO3\CMS\Core\Utility\MathUtility::canBeInterpretedAsInteger($uid)) {
 			throw new \InvalidArgumentException('Uid of related record has to be an integer.', 1316789798);
 		}
@@ -208,12 +210,21 @@ class FileRepository extends AbstractRepository {
 			'tablenames=' . $GLOBALS['TYPO3_DB']->fullQuoteStr($tableName, 'sys_file_reference') .
 				' AND deleted = 0' .
 				' AND hidden = 0' .
+				' AND pid != -1' .
 				' AND uid_foreign=' . intval($uid) .
 				' AND fieldname=' . $GLOBALS['TYPO3_DB']->fullQuoteStr($fieldName, 'sys_file_reference'),
 			'',
 			'sorting_foreign'
 		);
+
 		foreach ($references as $referenceRecord) {
+
+			// Wenn Workspace dann die Orginal UID verwenden
+			if ($considerWorkspaces) {
+				\TYPO3\CMS\Backend\Utility\BackendUtility::workspaceOL('sys_file_reference', $referenceRecord);
+			} elseif($referenceRecord['t3ver_state'] != 0) {
+				continue;
+			}
 			$itemList[] = $this->createFileReferenceObject($referenceRecord);
 		}
 		return $itemList;
